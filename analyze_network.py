@@ -829,6 +829,6 @@ class NetworkAnalyzer:
             "open_ports": [p["port"] for p in self.results.get("open_ports", []) if "port" in p][:64]
         }
 
-if __name__ == "main":
+if __name__ == "__main__":
     network = NetworkAnalyzer()
     print(network.analyze_network())
