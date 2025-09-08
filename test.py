@@ -3,144 +3,262 @@ import sys
 import threading
 import time
 import struct
+import random
 
-def get_stun_mapped_address(stun_server="stun.l.google.com", stun_port=19302):
-    """Get external IP and port using STUN server"""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(5)
+class NATDetector:
+    def __init__(self):
+        self.stun_servers = [
+            ("stun.l.google.com", 19302),
+            ("stun1.l.google.com", 19302),
+            ("stun2.l.google.com", 19302),
+            ("stun.stunprotocol.org", 3478)
+        ]
 
-    # STUN Binding Request
-    message_type = 0x0001
-    message_length = 0x0000
-    magic_cookie = 0x2112A442
-    transaction_id = b'\x00' * 12
+    def create_stun_request(self):
+        """Create STUN binding request"""
+        message_type = 0x0001
+        message_length = 0x0000
+        magic_cookie = 0x2112A442
+        transaction_id = bytes([random.randint(0, 255) for _ in range(12)])
 
-    stun_request = struct.pack('!HH', message_type, message_length) + \
-                   struct.pack('!I', magic_cookie) + transaction_id
+        return struct.pack('!HH', message_type, message_length) + \
+               struct.pack('!I', magic_cookie) + transaction_id
 
-    try:
-        sock.sendto(stun_request, (stun_server, stun_port))
-        response, addr = sock.recvfrom(1024)
+    def parse_stun_response(self, response):
+        """Parse STUN response for mapped address"""
+        if len(response) < 20:
+            return None, None
 
-        # Parse STUN response for mapped address
-        if len(response) >= 20:
-            # Look for MAPPED-ADDRESS attribute (type 0x0001)
-            offset = 20
-            while offset < len(response):
-                attr_type = struct.unpack('!H', response[offset:offset+2])[0]
-                attr_length = struct.unpack('!H', response[offset+2:offset+4])[0]
+        offset = 20
+        while offset < len(response):
+            if offset + 4 > len(response):
+                break
 
-                if attr_type == 0x0001:  # MAPPED-ADDRESS
+            attr_type = struct.unpack('!H', response[offset:offset+2])[0]
+            attr_length = struct.unpack('!H', response[offset+2:offset+4])[0]
+
+            if attr_type == 0x0001 and attr_length >= 8:  # MAPPED-ADDRESS
+                if offset + 12 <= len(response):
                     family = struct.unpack('!H', response[offset+5:offset+7])[0]
                     if family == 0x01:  # IPv4
                         port = struct.unpack('!H', response[offset+6:offset+8])[0]
                         ip_bytes = response[offset+8:offset+12]
                         ip = '.'.join(str(b) for b in ip_bytes)
-                        sock.close()
                         return ip, port
 
-                offset += 4 + attr_length
+            offset += 4 + attr_length
 
-        sock.close()
         return None, None
+
+    def get_mapped_address(self, local_port, stun_server):
+        """Get external address from STUN server"""
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(('', local_port))
+            sock.settimeout(3)
+
+            request = self.create_stun_request()
+            sock.sendto(request, stun_server)
+
+            response, addr = sock.recvfrom(1024)
+            ip, port = self.parse_stun_response(response)
+
+            sock.close()
+            return ip, port
+        except Exception as e:
+            return None, None
+
+    def detect_nat_type(self):
+        """Detect NAT type using multiple STUN servers"""
+        print("Detecting NAT type...")
+
+        base_port = random.randint(10000, 50000)
+        results = []
+
+        for i, server in enumerate(self.stun_servers[:3]):
+            local_port = base_port + i
+            print(f"Testing with {server[0]}:{server[1]} on local port {local_port}")
+
+            ip, port = self.get_mapped_address(local_port, server)
+            if ip and port:
+                results.append((ip, port, local_port))
+                print(f"  Mapped to: {ip}:{port}")
+            else:
+                print(f"  Failed to get mapping")
+
+        if len(results) < 2:
+            return "UNKNOWN - Not enough STUN responses"
+
+        # Analyze results
+        external_ips = set(r[0] for r in results)
+        external_ports = [r[1] for r in results]
+        local_ports = [r[2] for r in results]
+
+        if len(external_ips) > 1:
+            return "SYMMETRIC NAT - Different external IPs (Very hard to punch)"
+
+        # Check port allocation pattern
+        port_diffs = []
+        for i in range(1, len(external_ports)):
+            port_diff = external_ports[i] - external_ports[i-1]
+            local_diff = local_ports[i] - local_ports[i-1]
+            port_diffs.append(port_diff - local_diff)
+
+        if all(diff == 0 for diff in port_diffs):
+            return "FULL CONE NAT - Easy to punch"
+        elif len(set(external_ports)) == len(external_ports):
+            if all(diff > 0 for diff in port_diffs):
+                return "PORT RESTRICTED NAT - Moderate difficulty"
+            else:
+                return "SYMMETRIC NAT - Different ports (Hard to punch)"
+        else:
+            return "ADDRESS RESTRICTED NAT - Moderate difficulty"
+
+def tcp_listen(port, peer_ip, peer_port, stop_event):
+    """TCP listener that accepts connections"""
+    try:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(('0.0.0.0', port))
+        server.listen(1)
+        server.settimeout(1)  # Non-blocking accept
+
+        print(f"TCP listener started on port {port}")
+
+        while not stop_event.is_set():
+            try:
+                conn, addr = server.accept()
+                print(f"TCP connection established with {addr}")
+
+                # Handle the connection
+                threading.Thread(target=handle_tcp_connection, args=(conn, addr), daemon=True).start()
+                break
+
+            except socket.timeout:
+                continue
+            except Exception as e:
+                if not stop_event.is_set():
+                    print(f"TCP listen error: {e}")
+                break
+
+        server.close()
 
     except Exception as e:
-        print(f"STUN error: {e}")
-        sock.close()
-        return None, None
+        print(f"TCP listener setup error: {e}")
 
-def listen(sock):
-    while True:
-        try:
-            data, addr = sock.recvfrom(1024)
-            message = data.decode()
-            if message != "HOLE_PUNCH":
-                print(f"[RECV from {addr}] {message}")
-        except Exception as e:
-            print("Recv error:", e)
-            break
+def handle_tcp_connection(conn, addr):
+    """Handle established TCP connection"""
+    try:
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
 
-def aggressive_punch(sock, peer_ip, peer_port, my_external_port, stop_event):
-    """More aggressive hole punching with multiple strategies"""
-    print("Starting aggressive hole punching...")
+            message = data.decode().strip()
+            if message and message != "TCP_PUNCH":
+                print(f"[TCP RECV from {addr}] {message}")
+    except Exception as e:
+        print(f"TCP connection error: {e}")
+    finally:
+        conn.close()
 
-    # Try multiple ports around the expected port
-    port_range = range(max(1024, peer_port - 10), peer_port + 10)
+def tcp_punch(peer_ip, peer_port, local_port, stop_event):
+    """Aggressive TCP hole punching"""
+    print(f"Starting TCP hole punching to {peer_ip}:{peer_port}")
 
     while not stop_event.is_set():
         try:
-            # Standard punch to known port
-            sock.sendto(b"HOLE_PUNCH", (peer_ip, peer_port))
+            # Create socket and bind to specific local port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(('0.0.0.0', local_port))
+            sock.settimeout(1)
 
-            # Try nearby ports (for NAT port prediction)
-            for port in port_range:
-                if port != peer_port:
-                    try:
-                        sock.sendto(b"HOLE_PUNCH", (peer_ip, port))
-                    except:
-                        pass
+            # Try to connect (this creates the hole)
+            result = sock.connect_ex((peer_ip, peer_port))
 
-            time.sleep(0.5)  # More frequent punching
+            if result == 0:
+                print(f"TCP connection established to {peer_ip}:{peer_port}!")
+                # Connection successful, start chat
+                threading.Thread(target=handle_tcp_connection, args=(sock, (peer_ip, peer_port)), daemon=True).start()
+
+                # Send messages
+                while not stop_event.is_set():
+                    msg = input("You: ")
+                    if msg.lower() == 'quit':
+                        stop_event.set()
+                        break
+                    sock.send(msg.encode())
+
+                sock.close()
+                return
+
+            sock.close()
+            time.sleep(0.1)  # Quick retry
+
         except Exception as e:
-            print("Punch error:", e)
-            break
+            time.sleep(0.1)
 
-    print("Hole punching stopped.")
+    print("TCP hole punching stopped")
 
-def main(my_port, peer_ip, peer_port):
-    # Get our external address using STUN
-    print("Getting external address via STUN...")
-    my_external_ip, my_external_port = get_stun_mapped_address()
-
-    if my_external_ip:
-        print(f"My external address: {my_external_ip}:{my_external_port}")
-        print(f"Share this with your peer: {my_external_ip} {my_external_port}")
-    else:
-        print("Failed to get external address via STUN")
-
-    # Create socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", my_port))
-
-    # Start listening
-    threading.Thread(target=listen, args=(sock,), daemon=True).start()
-
-    # Wait for user to confirm peer is ready
-    input("Press Enter when peer is ready and you've exchanged external addresses...")
-
-    # Start aggressive hole punching
-    stop_punch = threading.Event()
-    punch_thread = threading.Thread(target=aggressive_punch,
-                                  args=(sock, peer_ip, peer_port, my_external_port, stop_punch),
-                                  daemon=True)
-    punch_thread.start()
-
-    print(f"Local socket: 0.0.0.0:{my_port}")
-    print(f"Target peer: {peer_ip}:{peer_port}")
-    print("Aggressive hole punching for 20 seconds...")
-
-    # Longer hole punching time
-    time.sleep(20)
-    stop_punch.set()
-
-    print("Starting message exchange. Type 'quit' to exit.")
-
-    # Message exchange
-    while True:
-        msg = input("You: ")
-        if msg.lower() == 'quit':
-            break
-        sock.sendto(msg.encode(), (peer_ip, peer_port))
-
-    sock.close()
-
-if __name__ == "__main__":
+def main():
     if len(sys.argv) != 4:
-        print(f"Usage: python {sys.argv[0]} <my_port> <peer_ip> <peer_port>")
+        print(f"Usage: python {sys.argv[0]} <local_port> <peer_ip> <peer_port>")
+        print("Example: python script.py 8000 203.0.113.10 8001")
         sys.exit(1)
 
-    my_port = int(sys.argv[1])
+    local_port = int(sys.argv[1])
     peer_ip = sys.argv[2]
     peer_port = int(sys.argv[3])
 
-    main(my_port, peer_ip, peer_port)
+    # First, detect NAT type
+    detector = NATDetector()
+    nat_type = detector.detect_nat_type()
+    print(f"\nNAT Type: {nat_type}\n")
+
+    if "SYMMETRIC" in nat_type:
+        print("WARNING: Symmetric NAT detected. TCP hole punching is very unlikely to work.")
+        print("Consider using a relay server or VPN instead.")
+        choice = input("Continue anyway? (y/n): ")
+        if choice.lower() != 'y':
+            return
+
+    # Get external address
+    print("Getting external address...")
+    detector_instance = NATDetector()
+    external_ip, external_port = detector_instance.get_mapped_address(local_port, detector_instance.stun_servers[0])
+
+    if external_ip:
+        print(f"Your external address: {external_ip}:{external_port}")
+        print(f"Share this with your peer: {external_ip} {external_port}")
+    else:
+        print("Could not determine external address")
+
+    print(f"\nLocal port: {local_port}")
+    print(f"Target: {peer_ip}:{peer_port}")
+
+    # Create stop event
+    stop_event = threading.Event()
+
+    # Start TCP listener
+    listen_thread = threading.Thread(target=tcp_listen, args=(local_port, peer_ip, peer_port, stop_event), daemon=True)
+    listen_thread.start()
+
+    # Wait a moment for listener to start
+    time.sleep(1)
+
+    input("Press Enter when both peers are ready...")
+
+    # Start TCP hole punching
+    punch_thread = threading.Thread(target=tcp_punch, args=(peer_ip, peer_port, local_port, stop_event), daemon=True)
+    punch_thread.start()
+
+    try:
+        # Wait for connection or user interrupt
+        punch_thread.join()
+    except KeyboardInterrupt:
+        print("\nShutting down...")
+        stop_event.set()
+
+if __name__ == "__main__":
+    main()
