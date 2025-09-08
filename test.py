@@ -8,10 +8,10 @@ import random
 class NATDetector:
     def __init__(self):
         self.stun_servers = [
-            ("stun.l.google.com", 19302),
-            ("stun1.l.google.com", 19302),
-            ("stun2.l.google.com", 19302),
-            ("stun.stunprotocol.org", 3478)
+            ("stun.1cbit.ru", 3478),
+            ("stun.finsterwalder.com", 3478),
+            ("stun.siplogin.de", 3478),
+            ("stun.romancecompass.com", 3478)
         ]
 
     def create_stun_request(self):
