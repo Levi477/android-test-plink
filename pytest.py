@@ -4,6 +4,7 @@ import sys
 import signal
 from typing import Optional
 
+import pyperclip
 from aiortc import (
     RTCPeerConnection,
     RTCDataChannel,
@@ -11,6 +12,14 @@ from aiortc import (
     RTCConfiguration,
     RTCIceServer
 )
+
+
+def get_clipboard_content() -> str:
+    try:
+        return pyperclip.paste()
+    except Exception as e:
+        print(f"Failed to read clipboard: {e}")
+        return ""
 
 
 class SimpleWebRTCChat:
@@ -104,37 +113,36 @@ async def main():
 
     chat = SimpleWebRTCChat()
 
-    choice = input("Choose mode:\n1. Create Offer\n2. Accept Offer\n> ").strip()
+    choice = input("Choose mode:\n1. Create Offer\n2. Accept Offer (from clipboard)\n> ").strip()
 
     if choice == "1":
         offer = await chat.create_offer()
-        print("\nSend this offer to peer:\n")
+        print("\nOffer generated (copy this to clipboard and send to peer):\n")
         print(offer)
-
-        print("\nPaste answer from peer (end with empty line):")
-        answer_lines = []
-        while True:
-            line = input()
-            if not line.strip():
-                break
-            answer_lines.append(line)
-        answer_text = "\n".join(answer_lines)
-
-        await chat.accept_answer(answer_text)
+        pyperclip.copy(offer)
+        print("\nOffer has been copied to clipboard.")
 
     elif choice == "2":
-        print("\nPaste offer from peer (end with empty line):")
-        offer_lines = []
-        while True:
-            line = input()
-            if not line.strip():
-                break
-            offer_lines.append(line)
-        offer_text = "\n".join(offer_lines)
+        print("\nReading offer from clipboard...")
 
-        answer = await chat.accept_offer(offer_text)
-        print("\nSend this answer back to peer:\n")
+        clipboard_content = get_clipboard_content()
+        if not clipboard_content:
+            print("Clipboard is empty or unreadable.")
+            return
+
+        try:
+            offer_data = json.loads(clipboard_content)
+            if not isinstance(offer_data, dict) or "sdp" not in offer_data:
+                print("Clipboard does not contain a valid offer JSON object.")
+                return
+        except json.JSONDecodeError:
+            print("Clipboard does not contain valid JSON.")
+            return
+
+        answer = await chat.accept_offer(clipboard_content)
+        print("\nAnswer generated (copied to clipboard, send this back to peer):\n")
         print(answer)
+        pyperclip.copy(answer)
 
     else:
         print("Invalid choice.")
