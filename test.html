@@ -38,6 +38,9 @@
                 text-align: left;
                 color: green;
             }
+            .loading {
+                color: orange;
+            }
         </style>
     </head>
     <body>
@@ -103,6 +106,7 @@
             let pc = null;
             let dataChannel = null;
             let isOfferer = false;
+            let iceCandidates = [];
 
             function log(msg) {
                 console.log(msg);
@@ -127,12 +131,24 @@
                     ],
                 });
 
+                iceCandidates = [];
+
                 pc.onicecandidate = (event) => {
-                    console.log("ICE candidate:", event.candidate);
+                    if (event.candidate) {
+                        iceCandidates.push(event.candidate);
+                        console.log("ICE candidate added:", event.candidate);
+                    } else {
+                        console.log("ICE gathering complete");
+                    }
                 };
 
                 pc.onconnectionstatechange = () => {
                     log("Connection state: " + pc.connectionState);
+                    if (pc.connectionState === "connected") {
+                        log("Connected! You can now chat.");
+                    } else if (pc.connectionState === "failed") {
+                        log("Connection failed. Try again.");
+                    }
                 };
 
                 pc.ondatachannel = (event) => {
@@ -171,7 +187,6 @@
                     initPeerConnection();
                     isOfferer = true;
 
-                    // Create data channel
                     dataChannel = pc.createDataChannel("chat");
                     setupDataChannel(dataChannel);
 
@@ -180,22 +195,25 @@
                     const offer = await pc.createOffer();
                     await pc.setLocalDescription(offer);
 
-                    // Wait for ICE gathering
+                    log("Gathering ICE candidates... Please wait.");
                     await waitForIceGathering();
 
-                    const offerObj = {
+                    const offerWithCandidates = {
                         type: pc.localDescription.type,
                         sdp: pc.localDescription.sdp,
+                        candidates: iceCandidates,
                     };
 
                     document.getElementById("offerDisplay").value =
-                        JSON.stringify(offerObj);
+                        JSON.stringify(offerWithCandidates, null, 2);
                     document.getElementById("offerSection").style.display =
                         "block";
                     document.getElementById("finalSection").style.display =
                         "block";
 
-                    log("Offer created. Send it to the other device.");
+                    log(
+                        "Offer created with ICE candidates. Send it to the other device.",
+                    );
                 } catch (error) {
                     log("Error creating offer: " + error.message);
                     console.error("Offer error:", error);
@@ -217,44 +235,58 @@
                         return;
                     }
 
-                    let offerObj;
+                    let offerData;
                     try {
-                        offerObj = JSON.parse(offerText);
+                        offerData = JSON.parse(offerText);
                     } catch (e) {
                         alert("Invalid JSON format");
                         return;
                     }
 
-                    if (!offerObj.type || !offerObj.sdp) {
+                    if (!offerData.type || !offerData.sdp) {
                         alert("Invalid offer format - missing type or sdp");
                         return;
                     }
 
                     initPeerConnection();
 
-                    log("Processing offer...");
+                    log("Processing offer and ICE candidates...");
 
                     await pc.setRemoteDescription(
-                        new RTCSessionDescription(offerObj),
+                        new RTCSessionDescription({
+                            type: offerData.type,
+                            sdp: offerData.sdp,
+                        }),
                     );
+
+                    if (offerData.candidates) {
+                        for (const candidate of offerData.candidates) {
+                            await pc.addIceCandidate(
+                                new RTCIceCandidate(candidate),
+                            );
+                        }
+                    }
 
                     const answer = await pc.createAnswer();
                     await pc.setLocalDescription(answer);
 
-                    // Wait for ICE gathering
+                    log("Gathering ICE candidates... Please wait.");
                     await waitForIceGathering();
 
-                    const answerObj = {
+                    const answerWithCandidates = {
                         type: pc.localDescription.type,
                         sdp: pc.localDescription.sdp,
+                        candidates: iceCandidates,
                     };
 
                     document.getElementById("answerDisplay").value =
-                        JSON.stringify(answerObj);
+                        JSON.stringify(answerWithCandidates, null, 2);
                     document.getElementById("answerOutput").style.display =
                         "block";
 
-                    log("Answer created. Send it back to the other device.");
+                    log(
+                        "Answer created with ICE candidates. Send it back to the other device.",
+                    );
                 } catch (error) {
                     log("Error accepting offer: " + error.message);
                     console.error("Accept offer error:", error);
@@ -271,26 +303,39 @@
                         return;
                     }
 
-                    let answerObj;
+                    let answerData;
                     try {
-                        answerObj = JSON.parse(answerText);
+                        answerData = JSON.parse(answerText);
                     } catch (e) {
                         alert("Invalid JSON format");
                         return;
                     }
 
-                    if (!answerObj.type || !answerObj.sdp) {
+                    if (!answerData.type || !answerData.sdp) {
                         alert("Invalid answer format - missing type or sdp");
                         return;
                     }
 
-                    log("Processing answer...");
+                    log("Processing answer and ICE candidates...");
 
                     await pc.setRemoteDescription(
-                        new RTCSessionDescription(answerObj),
+                        new RTCSessionDescription({
+                            type: answerData.type,
+                            sdp: answerData.sdp,
+                        }),
                     );
 
-                    log("Connection setup complete. Waiting for connection...");
+                    if (answerData.candidates) {
+                        for (const candidate of answerData.candidates) {
+                            await pc.addIceCandidate(
+                                new RTCIceCandidate(candidate),
+                            );
+                        }
+                    }
+
+                    log(
+                        "Connection setup complete. Establishing connection...",
+                    );
                 } catch (error) {
                     log("Error accepting answer: " + error.message);
                     console.error("Accept answer error:", error);
@@ -301,30 +346,36 @@
                 return new Promise((resolve) => {
                     if (pc.iceGatheringState === "complete") {
                         resolve();
-                    } else {
-                        const checkState = () => {
-                            if (pc.iceGatheringState === "complete") {
-                                pc.removeEventListener(
-                                    "icegatheringstatechange",
-                                    checkState,
-                                );
-                                resolve();
-                            }
-                        };
-                        pc.addEventListener(
+                        return;
+                    }
+
+                    const timeout = setTimeout(() => {
+                        pc.removeEventListener(
                             "icegatheringstatechange",
                             checkState,
                         );
+                        console.log(
+                            "ICE gathering timeout - proceeding with available candidates",
+                        );
+                        resolve();
+                    }, 60000); // 60 second timeout
 
-                        // Fallback timeout
-                        setTimeout(() => {
+                    const checkState = () => {
+                        console.log(
+                            "ICE gathering state:",
+                            pc.iceGatheringState,
+                        );
+                        if (pc.iceGatheringState === "complete") {
+                            clearTimeout(timeout);
                             pc.removeEventListener(
                                 "icegatheringstatechange",
                                 checkState,
                             );
                             resolve();
-                        }, 3000);
-                    }
+                        }
+                    };
+
+                    pc.addEventListener("icegatheringstatechange", checkState);
                 });
             }
 
@@ -347,11 +398,16 @@
                 const element = document.getElementById(elementId);
                 element.select();
                 element.setSelectionRange(0, 99999);
-                document.execCommand("copy");
-                alert("Copied to clipboard!");
+
+                try {
+                    document.execCommand("copy");
+                    alert("Copied to clipboard!");
+                } catch (err) {
+                    console.error("Failed to copy:", err);
+                    alert("Failed to copy. Please select and copy manually.");
+                }
             }
 
-            // Handle Enter key in message input
             document
                 .getElementById("messageInput")
                 .addEventListener("keypress", (e) => {
@@ -360,7 +416,6 @@
                     }
                 });
 
-            // Debug logging
             window.onerror = (msg, url, line, col, error) => {
                 console.error("Error:", msg, "at", line + ":" + col);
                 log("JavaScript error occurred - check console");

@@ -129,7 +129,7 @@ class SimpleWebRTCChat:
         else:
             print("Not connected - message not sent")
 
-    async def wait_for_connection(self, timeout_seconds=30):
+    async def wait_for_connection(self, timeout_seconds=60):
         print(f"Waiting for connection (timeout: {timeout_seconds}s)...")
         for i in range(timeout_seconds * 10):
             if self.connected:
@@ -267,7 +267,7 @@ async def main():
     print("CONNECTING...")
     print("=" * 40)
 
-    connected = await chat.wait_for_connection(30)
+    connected = await chat.wait_for_connection(60)
     if not connected:
         print("✗ Connection failed or timed out")
         return
