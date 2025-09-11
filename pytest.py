@@ -22,6 +22,33 @@ def get_clipboard_content() -> str:
         return ""
 
 
+def set_clipboard_content(text: str):
+    try:
+        clipman.set(text)
+    except Exception as e:
+        print(f"Failed to copy to clipboard: {e}")
+
+
+async def wait_for_clipboard_json(timeout=60) -> Optional[str]:
+    print(f"Waiting for valid JSON in clipboard (timeout {timeout} seconds)...")
+    elapsed = 0
+    interval = 0.5
+    while elapsed < timeout:
+        content = get_clipboard_content()
+        if content:
+            try:
+                data = json.loads(content)
+                if isinstance(data, dict) and "sdp" in data and "type" in data:
+                    print("Valid JSON found in clipboard.")
+                    return content
+            except json.JSONDecodeError:
+                pass
+        await asyncio.sleep(interval)
+        elapsed += interval
+    print("Timeout reached without valid clipboard content.")
+    return None
+
+
 class SimpleWebRTCChat:
     def __init__(self):
         self.pc = RTCPeerConnection(configuration=RTCConfiguration(
@@ -124,45 +151,28 @@ async def main():
 
     if choice == "1":
         offer = await chat.create_offer()
-        print("\nOffer generated (copy this to clipboard and send to peer):\n")
+        print("\nOffer generated (copied to clipboard):\n")
         print(offer)
-        try:
-            clipman.set(offer)
-            print("\nOffer has been copied to clipboard.")
-        except Exception as e:
-            print(f"Failed to copy to clipboard: {e}")
+        set_clipboard_content(offer)
+        print("\nOffer copied to clipboard.")
 
     elif choice == "2":
-        print("\nReading offer from clipboard...")
-
-        clipboard_content = get_clipboard_content()
+        clipboard_content = await wait_for_clipboard_json(timeout=60)
         if not clipboard_content:
-            print("Clipboard is empty or unreadable.")
-            return
-
-        try:
-            offer_data = json.loads(clipboard_content)
-            if not isinstance(offer_data, dict) or "sdp" not in offer_data:
-                print("Clipboard does not contain a valid offer JSON object.")
-                return
-        except json.JSONDecodeError:
-            print("Clipboard does not contain valid JSON.")
+            print("Failed to get valid JSON from clipboard.")
             return
 
         answer = await chat.accept_offer(clipboard_content)
-        print("\nAnswer generated (copied to clipboard, send this back to peer):\n")
+        print("\nAnswer generated (copied to clipboard):\n")
         print(answer)
-        try:
-            clipman.set(answer)
-        except Exception as e:
-            print(f"Failed to copy to clipboard: {e}")
+        set_clipboard_content(answer)
 
     else:
         print("Invalid choice.")
         return
 
     print("\nWaiting for connection...")
-    for _ in range(100):  # Increased timeout to 10 seconds
+    for _ in range(100):  # 10 seconds timeout
         await asyncio.sleep(0.1)
         if chat.connected:
             break
