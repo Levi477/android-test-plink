@@ -162,7 +162,7 @@ async def main():
         return
 
     print("\nWaiting for connection...")
-    for _ in range(50):
+    for _ in range(100):  # Increased timeout to 10 seconds
         await asyncio.sleep(0.1)
         if chat.connected:
             break
