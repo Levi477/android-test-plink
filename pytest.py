@@ -4,14 +4,20 @@ import sys
 import signal
 from typing import Optional
 
-from aiortc import RTCPeerConnection, RTCDataChannel, RTCSessionDescription
+from aiortc import (
+    RTCPeerConnection,
+    RTCDataChannel,
+    RTCSessionDescription,
+    RTCConfiguration,
+    RTCIceServer
+)
 
 
 class SimpleWebRTCChat:
     def __init__(self):
-        self.pc = RTCPeerConnection(configuration={
-            "iceServers": [{"urls": "stun:stun.3wayint.com:3478"}]
-        })
+        self.pc = RTCPeerConnection(configuration=RTCConfiguration(
+            iceServers=[RTCIceServer(urls="stun:stun.l.google.com:19302")]
+        ))
         self.data_channel: Optional[RTCDataChannel] = None
         self.connected = False
         self.is_offerer = False
@@ -46,7 +52,6 @@ class SimpleWebRTCChat:
     async def create_offer(self):
         self.is_offerer = True
         self.data_channel = self.pc.createDataChannel("chat")
-        self.setup_handlers()
 
         offer = await self.pc.createOffer()
         await self.pc.setLocalDescription(offer)
