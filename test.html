@@ -9,11 +9,11 @@
             }
             textarea {
                 width: 100%;
-                height: 100px;
+                height: 80px;
                 margin: 10px 0;
             }
             button {
-                padding: 10px;
+                padding: 8px 15px;
                 margin: 5px;
             }
             .section {
@@ -26,6 +26,7 @@
                 overflow-y: scroll;
                 border: 1px solid #ccc;
                 padding: 10px;
+                margin: 10px 0;
             }
             .message {
                 margin: 5px 0;
@@ -38,138 +39,54 @@
                 text-align: left;
                 color: green;
             }
-            .loading {
-                color: orange;
-            }
-            .sync-section {
-                background-color: #f0f8ff;
-                border: 2px solid #4169e1;
-                padding: 20px;
-                margin: 15px 0;
-                border-radius: 8px;
-            }
-            .sync-button {
-                background-color: #4169e1;
-                color: white;
-                font-weight: bold;
-                padding: 15px 30px;
-                font-size: 16px;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-            }
-            .sync-button:hover {
-                background-color: #2e4bc6;
-            }
-            .sync-button:disabled {
-                background-color: #cccccc;
-                cursor: not-allowed;
-            }
-            .instructions {
-                background-color: #fffacd;
-                padding: 15px;
-                border-left: 4px solid #ffd700;
-                margin: 10px 0;
-            }
         </style>
     </head>
     <body>
-        <h1>WebRTC P2P Chat with Synchronization</h1>
-
+        <h1>WebRTC P2P Chat</h1>
         <div id="status">Status: Disconnected</div>
 
         <div class="section">
-            <h3>Connection Setup</h3>
-            <button onclick="createOffer()">1. Create Offer (Device A)</button>
+            <h3>Step 1: Setup</h3>
+            <button onclick="createOffer()">Create Offer (Device A)</button>
             <button onclick="showAnswerSection()">
-                2. I have an offer (Device B)
+                Accept Offer (Device B)
             </button>
 
             <div id="offerSection" style="display: none">
-                <h4>Your Offer - Send this to the other device:</h4>
+                <h4>Send this offer to other device:</h4>
                 <textarea id="offerDisplay" readonly></textarea>
-                <button onclick="copyText('offerDisplay')">Copy Offer</button>
             </div>
 
             <div id="answerSection" style="display: none">
-                <h4>Paste the offer you received here:</h4>
-                <textarea
-                    id="offerInput"
-                    placeholder="Paste offer here..."
-                ></textarea>
-                <button onclick="acceptOffer()">
-                    Accept Offer & Create Answer
-                </button>
+                <h4>Paste offer here:</h4>
+                <textarea id="offerInput"></textarea>
+                <button onclick="acceptOffer()">Create Answer</button>
 
                 <div id="answerOutput" style="display: none">
-                    <h4>Your Answer - Send this back:</h4>
+                    <h4>Send this answer back:</h4>
                     <textarea id="answerDisplay" readonly></textarea>
-                    <button onclick="copyText('answerDisplay')">
-                        Copy Answer
-                    </button>
                 </div>
             </div>
 
             <div id="finalSection" style="display: none">
-                <h4>Paste the answer you received here:</h4>
-                <textarea
-                    id="answerInput"
-                    placeholder="Paste answer here..."
-                ></textarea>
+                <h4>Paste answer here:</h4>
+                <textarea id="answerInput"></textarea>
                 <button onclick="acceptAnswer()">Complete Setup</button>
             </div>
         </div>
 
-        <div id="syncSection" class="sync-section" style="display: none">
-            <h3>🔄 Synchronization Step</h3>
-            <div class="instructions">
-                <strong>Important:</strong> Both devices must click "Start
-                Connection" at roughly the same time to establish the connection
-                properly. <br /><br />
-                <strong>Instructions:</strong>
-                <ol>
-                    <li>
-                        Make sure both devices have completed the offer/answer
-                        exchange above
-                    </li>
-                    <li>
-                        Coordinate with the other person (e.g., count "3, 2, 1,
-                        GO!")
-                    </li>
-                    <li>Both click "Start Connection" simultaneously</li>
-                </ol>
-            </div>
-            <div style="text-align: center; margin: 20px 0">
-                <button
-                    id="startConnectionBtn"
-                    class="sync-button"
-                    onclick="startConnection()"
-                >
-                    🚀 Start Connection
-                </button>
-            </div>
-            <div
-                id="connectionProgress"
-                style="display: none; text-align: center; margin: 10px 0"
-            >
-                <div style="color: #4169e1; font-weight: bold">
-                    Connecting... Please wait
-                </div>
-                <div style="font-size: 12px; color: #666; margin-top: 5px">
-                    If connection fails, try clicking "Start Connection" again
-                </div>
-            </div>
+        <div id="syncSection" style="display: none" class="section">
+            <h3>Step 2: Connect</h3>
+            <p>Both devices click Start Connection at the same time:</p>
+            <button id="startBtn" onclick="startConnection()">
+                Start Connection
+            </button>
         </div>
 
         <div class="section">
             <h3>Chat</h3>
             <div id="messages"></div>
-            <input
-                type="text"
-                id="messageInput"
-                placeholder="Type message..."
-                disabled
-            />
+            <input type="text" id="messageInput" disabled />
             <button onclick="sendMessage()" id="sendBtn" disabled>Send</button>
         </div>
 
@@ -178,7 +95,6 @@
             let dataChannel = null;
             let isOfferer = false;
             let iceCandidates = [];
-            let setupComplete = false;
 
             function log(msg) {
                 console.log(msg);
@@ -189,24 +105,15 @@
             function addMessage(msg, sent) {
                 const div = document.createElement("div");
                 div.className = "message " + (sent ? "sent" : "received");
-                div.textContent = (sent ? "You: " : "Peer: ") + msg;
+                div.textContent = (sent ? "You: " : "Other: ") + msg;
                 document.getElementById("messages").appendChild(div);
                 document.getElementById("messages").scrollTop =
                     document.getElementById("messages").scrollHeight;
             }
 
-            function showSyncSection() {
-                document.getElementById("syncSection").style.display = "block";
-                document.getElementById("startConnectionBtn").disabled = false;
-                log("Setup complete. Ready for synchronized connection.");
-            }
-
             function initPeerConnection() {
                 pc = new RTCPeerConnection({
-                    iceServers: [
-                        { urls: "stun:stun.l.google.com:19302" },
-                        { urls: "stun:stun1.l.google.com:19302" },
-                    ],
+                    iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
                 });
 
                 iceCandidates = [];
@@ -214,120 +121,54 @@
                 pc.onicecandidate = (event) => {
                     if (event.candidate) {
                         iceCandidates.push(event.candidate);
-                        console.log("ICE candidate added:", event.candidate);
-                    } else {
-                        console.log("ICE gathering complete");
                     }
                 };
 
                 pc.onconnectionstatechange = () => {
-                    console.log("Connection state:", pc.connectionState);
+                    log(pc.connectionState);
                     if (pc.connectionState === "connected") {
-                        log("🎉 Connected! You can now chat.");
-                        document.getElementById(
-                            "connectionProgress",
-                        ).style.display = "none";
-                        document.getElementById(
-                            "startConnectionBtn",
-                        ).style.display = "none";
-                    } else if (pc.connectionState === "failed") {
-                        log(
-                            "❌ Connection failed. Try 'Start Connection' again.",
-                        );
-                        document.getElementById(
-                            "connectionProgress",
-                        ).style.display = "none";
-                        document.getElementById("startConnectionBtn").disabled =
+                        document.getElementById("messageInput").disabled =
                             false;
-                        document.getElementById(
-                            "startConnectionBtn",
-                        ).textContent = "🔄 Retry Connection";
-                    } else if (pc.connectionState === "connecting") {
-                        log("🔄 Connecting...");
-                        document.getElementById(
-                            "connectionProgress",
-                        ).style.display = "block";
+                        document.getElementById("sendBtn").disabled = false;
+                        document.getElementById("startBtn").style.display =
+                            "none";
                     }
                 };
 
                 pc.ondatachannel = (event) => {
-                    const channel = event.channel;
-                    setupDataChannel(channel);
-                    log("Data channel received");
-                };
-
-                pc.onicecandidateerror = (event) => {
-                    console.error("ICE candidate error:", event);
+                    setupDataChannel(event.channel);
                 };
             }
 
             function setupDataChannel(channel) {
                 dataChannel = channel;
-
-                dataChannel.onopen = () => {
-                    log("🎉 Connected! You can now chat.");
-                    document.getElementById("messageInput").disabled = false;
-                    document.getElementById("sendBtn").disabled = false;
-                    document.getElementById(
-                        "connectionProgress",
-                    ).style.display = "none";
-                    document.getElementById(
-                        "startConnectionBtn",
-                    ).style.display = "none";
-                };
-
                 dataChannel.onmessage = (event) => {
                     addMessage(event.data, false);
-                };
-
-                dataChannel.onclose = () => {
-                    log("Connection closed");
-                    document.getElementById("messageInput").disabled = true;
-                    document.getElementById("sendBtn").disabled = true;
-                };
-
-                dataChannel.onerror = (error) => {
-                    log("Data channel error: " + error);
-                    console.error("Data channel error:", error);
                 };
             }
 
             async function createOffer() {
-                try {
-                    initPeerConnection();
-                    isOfferer = true;
+                initPeerConnection();
+                isOfferer = true;
 
-                    dataChannel = pc.createDataChannel("chat", {
-                        ordered: true,
-                    });
-                    setupDataChannel(dataChannel);
+                dataChannel = pc.createDataChannel("chat");
+                setupDataChannel(dataChannel);
 
-                    log("Creating offer...");
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                await waitForIce();
 
-                    const offer = await pc.createOffer();
-                    await pc.setLocalDescription(offer);
+                const data = {
+                    type: pc.localDescription.type,
+                    sdp: pc.localDescription.sdp,
+                    candidates: iceCandidates,
+                };
 
-                    log("Gathering ICE candidates... Please wait.");
-                    await waitForIceGathering();
-
-                    const offerWithCandidates = {
-                        type: pc.localDescription.type,
-                        sdp: pc.localDescription.sdp,
-                        candidates: iceCandidates,
-                    };
-
-                    document.getElementById("offerDisplay").value =
-                        JSON.stringify(offerWithCandidates, null, 2);
-                    document.getElementById("offerSection").style.display =
-                        "block";
-                    document.getElementById("finalSection").style.display =
-                        "block";
-
-                    log("Offer created. Send it to the other device.");
-                } catch (error) {
-                    log("Error creating offer: " + error.message);
-                    console.error("Offer error:", error);
-                }
+                document.getElementById("offerDisplay").value =
+                    JSON.stringify(data);
+                document.getElementById("offerSection").style.display = "block";
+                document.getElementById("finalSection").style.display = "block";
+                log("Offer created");
             }
 
             function showAnswerSection() {
@@ -336,207 +177,72 @@
             }
 
             async function acceptOffer() {
-                try {
-                    const offerText = document
-                        .getElementById("offerInput")
-                        .value.trim();
-                    if (!offerText) {
-                        alert("Please paste an offer first");
-                        return;
-                    }
+                const input = document
+                    .getElementById("offerInput")
+                    .value.trim();
+                if (!input) return;
 
-                    let offerData;
-                    try {
-                        offerData = JSON.parse(offerText);
-                    } catch (e) {
-                        alert("Invalid JSON format");
-                        return;
-                    }
+                const data = JSON.parse(input);
 
-                    if (!offerData.type || !offerData.sdp) {
-                        alert("Invalid offer format - missing type or sdp");
-                        return;
-                    }
+                initPeerConnection();
 
-                    initPeerConnection();
+                await pc.setRemoteDescription(
+                    new RTCSessionDescription({
+                        type: data.type,
+                        sdp: data.sdp,
+                    }),
+                );
 
-                    log("Processing offer...");
-
-                    await pc.setRemoteDescription(
-                        new RTCSessionDescription({
-                            type: offerData.type,
-                            sdp: offerData.sdp,
-                        }),
-                    );
-
-                    if (offerData.candidates) {
-                        for (const candidate of offerData.candidates) {
-                            await pc.addIceCandidate(
-                                new RTCIceCandidate(candidate),
-                            );
-                        }
-                        log(
-                            "Added " +
-                                offerData.candidates.length +
-                                " ICE candidates",
-                        );
-                    }
-
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-
-                    log("Gathering ICE candidates... Please wait.");
-                    await waitForIceGathering();
-
-                    const answerWithCandidates = {
-                        type: pc.localDescription.type,
-                        sdp: pc.localDescription.sdp,
-                        candidates: iceCandidates,
-                    };
-
-                    document.getElementById("answerDisplay").value =
-                        JSON.stringify(answerWithCandidates, null, 2);
-                    document.getElementById("answerOutput").style.display =
-                        "block";
-
-                    setupComplete = true;
-                    showSyncSection();
-                    log(
-                        "Answer created. Send it back, then both devices click 'Start Connection'.",
-                    );
-                } catch (error) {
-                    log("Error accepting offer: " + error.message);
-                    console.error("Accept offer error:", error);
+                for (const candidate of data.candidates) {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
                 }
+
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                await waitForIce();
+
+                const answerData = {
+                    type: pc.localDescription.type,
+                    sdp: pc.localDescription.sdp,
+                    candidates: iceCandidates,
+                };
+
+                document.getElementById("answerDisplay").value =
+                    JSON.stringify(answerData);
+                document.getElementById("answerOutput").style.display = "block";
+                document.getElementById("syncSection").style.display = "block";
+                log("Answer created");
             }
 
             async function acceptAnswer() {
-                try {
-                    const answerText = document
-                        .getElementById("answerInput")
-                        .value.trim();
-                    if (!answerText) {
-                        alert("Please paste an answer first");
-                        return;
-                    }
+                const input = document
+                    .getElementById("answerInput")
+                    .value.trim();
+                if (!input) return;
 
-                    let answerData;
-                    try {
-                        answerData = JSON.parse(answerText);
-                    } catch (e) {
-                        alert("Invalid JSON format");
-                        return;
-                    }
+                const data = JSON.parse(input);
 
-                    if (!answerData.type || !answerData.sdp) {
-                        alert("Invalid answer format - missing type or sdp");
-                        return;
-                    }
+                await pc.setRemoteDescription(
+                    new RTCSessionDescription({
+                        type: data.type,
+                        sdp: data.sdp,
+                    }),
+                );
 
-                    log("Processing answer...");
-
-                    await pc.setRemoteDescription(
-                        new RTCSessionDescription({
-                            type: answerData.type,
-                            sdp: answerData.sdp,
-                        }),
-                    );
-
-                    if (answerData.candidates) {
-                        for (const candidate of answerData.candidates) {
-                            await pc.addIceCandidate(
-                                new RTCIceCandidate(candidate),
-                            );
-                        }
-                        log(
-                            "Added " +
-                                answerData.candidates.length +
-                                " ICE candidates",
-                        );
-                    }
-
-                    setupComplete = true;
-                    showSyncSection();
-                    log(
-                        "Setup complete. Both devices should now click 'Start Connection'.",
-                    );
-                } catch (error) {
-                    log("Error accepting answer: " + error.message);
-                    console.error("Accept answer error:", error);
+                for (const candidate of data.candidates) {
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
                 }
+
+                document.getElementById("syncSection").style.display = "block";
+                log("Setup complete");
             }
 
-            async function startConnection() {
-                if (!setupComplete) {
-                    alert("Please complete the offer/answer exchange first");
-                    return;
-                }
-
-                try {
-                    document.getElementById("startConnectionBtn").disabled =
-                        true;
-                    document.getElementById("startConnectionBtn").textContent =
-                        "⏳ Connecting...";
-                    document.getElementById(
-                        "connectionProgress",
-                    ).style.display = "block";
-
-                    log("🚀 Starting connection process...");
-
-                    // Give a small delay for coordination
-                    await new Promise((resolve) => setTimeout(resolve, 500));
-
-                    // Force ICE restart to ensure fresh connection attempt
-                    if (pc && pc.connectionState !== "connected") {
-                        // Trigger ICE restart by creating new offer/answer if needed
-                        if (isOfferer && dataChannel) {
-                            // For offerer, try to send a message through data channel to test
-                            if (
-                                dataChannel.readyState === "connecting" ||
-                                dataChannel.readyState === "open"
-                            ) {
-                                log(
-                                    "Data channel ready, attempting connection...",
-                                );
-                            }
-                        }
-
-                        log(
-                            "Initiating connection... Please wait up to 30 seconds.",
-                        );
-
-                        // Set a timeout for connection attempts
-                        setTimeout(() => {
-                            if (pc && pc.connectionState !== "connected") {
-                                log(
-                                    "Connection taking longer than expected. You may retry.",
-                                );
-                                document.getElementById(
-                                    "startConnectionBtn",
-                                ).disabled = false;
-                                document.getElementById(
-                                    "startConnectionBtn",
-                                ).textContent = "🔄 Retry Connection";
-                                document.getElementById(
-                                    "connectionProgress",
-                                ).style.display = "none";
-                            }
-                        }, 30000);
-                    }
-                } catch (error) {
-                    log("Error starting connection: " + error.message);
-                    console.error("Start connection error:", error);
-                    document.getElementById("startConnectionBtn").disabled =
-                        false;
-                    document.getElementById("startConnectionBtn").textContent =
-                        "🔄 Retry Connection";
-                    document.getElementById(
-                        "connectionProgress",
-                    ).style.display = "none";
-                }
+            function startConnection() {
+                document.getElementById("startBtn").disabled = true;
+                log("Connecting...");
             }
 
-            function waitForIceGathering() {
+            function waitForIce() {
                 return new Promise((resolve) => {
                     if (pc.iceGatheringState === "complete") {
                         resolve();
@@ -544,24 +250,10 @@
                     }
 
                     const timeout = setTimeout(() => {
-                        pc.removeEventListener(
-                            "icegatheringstatechange",
-                            checkState,
-                        );
-                        console.log(
-                            "ICE gathering timeout - proceeding with available candidates:",
-                            iceCandidates.length,
-                        );
                         resolve();
-                    }, 10000); // 10 second timeout
+                    }, 5000);
 
                     const checkState = () => {
-                        console.log(
-                            "ICE gathering state:",
-                            pc.iceGatheringState,
-                            "Candidates:",
-                            iceCandidates.length,
-                        );
                         if (pc.iceGatheringState === "complete") {
                             clearTimeout(timeout);
                             pc.removeEventListener(
@@ -579,49 +271,23 @@
             function sendMessage() {
                 const input = document.getElementById("messageInput");
                 const message = input.value.trim();
+                if (
+                    !message ||
+                    !dataChannel ||
+                    dataChannel.readyState !== "open"
+                )
+                    return;
 
-                if (!message) return;
-
-                if (dataChannel && dataChannel.readyState === "open") {
-                    dataChannel.send(message);
-                    addMessage(message, true);
-                    input.value = "";
-                } else {
-                    log(
-                        "Connection not ready. Status: " +
-                            (dataChannel
-                                ? dataChannel.readyState
-                                : "no channel"),
-                    );
-                }
-            }
-
-            function copyText(elementId) {
-                const element = document.getElementById(elementId);
-                element.select();
-                element.setSelectionRange(0, 99999);
-
-                try {
-                    document.execCommand("copy");
-                    alert("Copied to clipboard!");
-                } catch (err) {
-                    console.error("Failed to copy:", err);
-                    alert("Failed to copy. Please select and copy manually.");
-                }
+                dataChannel.send(message);
+                addMessage(message, true);
+                input.value = "";
             }
 
             document
                 .getElementById("messageInput")
                 .addEventListener("keypress", (e) => {
-                    if (e.key === "Enter") {
-                        sendMessage();
-                    }
+                    if (e.key === "Enter") sendMessage();
                 });
-
-            window.onerror = (msg, url, line, col, error) => {
-                console.error("Error:", msg, "at", line + ":" + col);
-                log("JavaScript error occurred - check console");
-            };
         </script>
     </body>
 </html>
