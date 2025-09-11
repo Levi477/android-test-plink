@@ -4,7 +4,7 @@ import sys
 import signal
 from typing import Optional
 
-import pyperclip
+import clipman
 from aiortc import (
     RTCPeerConnection,
     RTCDataChannel,
@@ -16,7 +16,7 @@ from aiortc import (
 
 def get_clipboard_content() -> str:
     try:
-        return pyperclip.paste()
+        return clipman.get()
     except Exception as e:
         print(f"Failed to read clipboard: {e}")
         return ""
@@ -111,6 +111,13 @@ class SimpleWebRTCChat:
 async def main():
     print("Simple WebRTC P2P Chat")
 
+    # Initialize clipman
+    try:
+        clipman.init()
+    except Exception as e:
+        print(f"Failed to initialize clipman: {e}")
+        return
+
     chat = SimpleWebRTCChat()
 
     choice = input("Choose mode:\n1. Create Offer\n2. Accept Offer (from clipboard)\n> ").strip()
@@ -119,8 +126,11 @@ async def main():
         offer = await chat.create_offer()
         print("\nOffer generated (copy this to clipboard and send to peer):\n")
         print(offer)
-        pyperclip.copy(offer)
-        print("\nOffer has been copied to clipboard.")
+        try:
+            clipman.set(offer)
+            print("\nOffer has been copied to clipboard.")
+        except Exception as e:
+            print(f"Failed to copy to clipboard: {e}")
 
     elif choice == "2":
         print("\nReading offer from clipboard...")
@@ -142,7 +152,10 @@ async def main():
         answer = await chat.accept_offer(clipboard_content)
         print("\nAnswer generated (copied to clipboard, send this back to peer):\n")
         print(answer)
-        pyperclip.copy(answer)
+        try:
+            clipman.set(answer)
+        except Exception as e:
+            print(f"Failed to copy to clipboard: {e}")
 
     else:
         print("Invalid choice.")
